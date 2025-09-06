@@ -1,128 +1,288 @@
+# app.py
 import streamlit as st
 import random
+import textwrap
 
-def main():
-    """A CSS Shape Generator App by Amna"""
-    st.title("Advanced CSS Shape Generator by Amna")
+st.set_page_config(page_title="CSS Shape Generator — Amna", layout="wide")
 
-    activity = ['Design', 'About']
-    choice = st.sidebar.selectbox("Select Activity", activity)
+def hex_to_rgba(hex_color: str, alpha: float = 1.0):
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
-    if choice == 'Design':
-        st.subheader("Design Your Shape")
-        
-        # Basic color pickers
-        col1, col2 = st.columns(2)
-        with col1:
-            bgcolor = st.color_picker("Pick Background color", "#0000FF")
-        with col2:
-            fontcolor = st.color_picker("Pick Font Color", "#FFFFFF")
+def random_color():
+    return "#{:06x}".format(random.randint(0, 0xFFFFFF))
 
-        # Display header with selected colors
-        html_temp = """
-        <div style="background-color:{};padding:10px;border-radius:10px">
-        <h1 style="color:{};text-align:center;">CSS Shape Generator by Amna</h1>
-        </div>
-        """
-        st.markdown(html_temp.format(bgcolor, fontcolor), unsafe_allow_html=True)
+def build_background_style(use_gradient, bg_color, g1, g2, direction):
+    if use_gradient:
+        if direction == "radial":
+            return f"background: radial-gradient(circle, {g1}, {g2});"
+        return f"background: linear-gradient({direction}, {g1}, {g2});"
+    else:
+        return f"background-color: {bg_color};"
 
-        # ADVANCED FEATURE 1: Gradient Background Option
-        st.subheader("Advanced Options")
-        use_gradient = st.checkbox("Use Gradient Background")
-        
-        if use_gradient:
-            col1, col2 = st.columns(2)
-            with col1:
-                gradient_color1 = st.color_picker("Gradient Color 1", "#FF0000")
-            with col2:
-                gradient_color2 = st.color_picker("Gradient Color 2", "#0000FF")
-            gradient_direction = st.selectbox("Gradient Direction", 
-                                           ["to right", "to left", "to bottom", "to top", 
-                                            "to bottom right", "to top left", "circle"])
-            bg_style = f"background: linear-gradient({gradient_direction}, {gradient_color1}, {gradient_color2})"
+def build_border_css(top, right, bottom, left, style, color):
+    return (
+        f"border-top: {top}px {style} {color};"
+        f"border-right: {right}px {style} {color};"
+        f"border-bottom: {bottom}px {style} {color};"
+        f"border-left: {left}px {style} {color};"
+    )
+
+def build_clip_path(shape, polygon_points):
+    if shape == "default (none)":
+        return ""
+    if shape == "circle":
+        return "clip-path: circle(50% at 50% 50%);"
+    if shape == "ellipse":
+        return "clip-path: ellipse(50% 35% at 50% 50%);"
+    if shape == "triangle":
+        return "clip-path: polygon(50% 0%, 0% 100%, 100% 100%);"
+    if shape == "polygon (custom)":
+        return f"clip-path: polygon({polygon_points});"
+    return ""
+
+def generate_css(props):
+    radius = f"border-radius: {props['tl']}px {props['tr']}px {props['br']}px {props['bl']}px;"
+    bg = build_background_style(props['use_gradient'], props['bg_color'], props['g1'], props['g2'], props['g_dir'])
+    border = build_border_css(props['b_top'], props['b_right'], props['b_bottom'], props['b_left'], props['b_style'], props['b_color'])
+    shadow = props['shadow_css']
+    transform = f"transform: rotate({props['rotate']}deg) skew({props['skew_x']}deg, {props['skew_y']}deg) scale({props['scale']});"
+    clip = build_clip_path(props['shape'], props['polygon_points'])
+    size_w = f"{props['width']}{props['unit']}"
+    size_h = f"{props['height']}{props['unit']}"
+    css = textwrap.dedent(f"""
+    .shape-preview {{
+      width: {size_w};
+      height: {size_h};
+      {bg}
+      {radius}
+      {border}
+      {shadow}
+      {transform}
+      {clip}
+      margin: 20px auto;
+      display: block;
+    }}
+    """).strip()
+    return css
+
+# --- Sidebar: Presets & Randomize ------------------------------------------------
+st.sidebar.title("Controls")
+if "seed" not in st.session_state:
+    st.session_state.seed = 0
+
+preset = st.sidebar.selectbox("Presets", ["None", "Rounded Card", "Pill / Badge", "Perfect Circle", "Triangle", "Soft Card (shadow)"])
+if st.sidebar.button("Randomize"):
+    # produce random values (stored in session_state so UI updates)
+    st.session_state.seed += 1
+    st.session_state._random = {
+        "bg_color": random_color(),
+        "g1": random_color(),
+        "g2": random_color(),
+        "b_color": random_color(),
+        "width": random.randint(80, 360),
+        "height": random.randint(80, 360),
+        "tl": random.randint(0, 100),
+        "tr": random.randint(0, 100),
+        "br": random.randint(0, 100),
+        "bl": random.randint(0, 100),
+        "b_top": random.randint(0, 8),
+        "b_right": random.randint(0, 8),
+        "b_bottom": random.randint(0, 8),
+        "b_left": random.randint(0, 8),
+        "rotate": random.randint(0, 360),
+        "skew_x": random.randint(-20, 20),
+        "skew_y": random.randint(-20, 20),
+        "scale": round(random.uniform(0.5, 1.5), 2)
+    }
+
+# --- Main layout ------------------------------------------------
+st.write("Use the controls to the left to design a shape. Preview updates live. Export CSS or copy to clipboard.")
+
+col_preview, col_controls = st.columns([1, 1.2])
+
+# --- Defaults / initial values (use random overrides if present) -----------------
+rand = st.session_state.get("_random", {})
+def rget(k, default):
+    return rand.get(k, default)
+
+with col_controls:
+    st.header("Shape Properties")
+
+    # Basic size + units
+    size_col1, size_col2 = st.columns([2,1])
+    with size_col1:
+        width = st.number_input("Width", min_value=10, max_value=2000, value=int(rget("width", 150)))
+        height = st.number_input("Height", min_value=10, max_value=2000, value=int(rget("height", 150)))
+    with size_col2:
+        unit = st.selectbox("Unit", ["px", "%", "vw", "vh"], index=0)
+
+    # Background
+    st.subheader("Background")
+    use_gradient = st.checkbox("Use gradient", value=False)
+    if use_gradient:
+        g1 = st.color_picker("Gradient color 1", rget("g1", "#FF6B6B"))
+        g2 = st.color_picker("Gradient color 2", rget("g2", "#5568FF"))
+        g_dir = st.selectbox("Direction", ["to right", "to left", "to bottom", "to top", "radial"], index=0)
+        bg_color = "#00000000"  # not used when gradient on
+    else:
+        bg_color = st.color_picker("Background color", rget("bg_color", "#654FEF"))
+        g1 = g2 = g_dir = None
+
+    # Borders & radius grouped
+    with st.expander("Borders & Radius", expanded=True):
+        colb1, colb2 = st.columns(2)
+        with colb1:
+            b_top = st.slider("Top border (px)", 0, 40, int(rget("b_top", 1)))
+            b_right = st.slider("Right border (px)", 0, 40, int(rget("b_right", 1)))
+            b_bottom = st.slider("Bottom border (px)", 0, 40, int(rget("b_bottom", 1)))
+            b_left = st.slider("Left border (px)", 0, 40, int(rget("b_left", 1)))
+        with colb2:
+            b_style = st.selectbox("Border style", ["solid", "dotted", "dashed", "double", "groove", "ridge"], index=0)
+            b_color = st.color_picker("Border color", rget("b_color", "#222222"))
+
+        tcol, rcol = st.columns(2)
+        with tcol:
+            tl = st.slider("Top-left radius (px)", 0, 200, int(rget("tl", 10)))
+            tr = st.slider("Top-right radius (px)", 0, 200, int(rget("tr", 10)))
+        with rcol:
+            bl = st.slider("Bottom-left radius (px)", 0, 200, int(rget("bl", 10)))
+            br = st.slider("Bottom-right radius (px)", 0, 200, int(rget("br", 10)))
+
+    # Shadows
+    with st.expander("Shadow (box-shadow)", expanded=False):
+        use_shadow = st.checkbox("Enable shadow", value=True)
+        if use_shadow:
+            sh_h = st.slider("Horizontal offset", -100, 100, 8)
+            sh_v = st.slider("Vertical offset", -100, 100, 12)
+            sh_blur = st.slider("Blur radius", 0, 200, 30)
+            sh_spread = st.slider("Spread", -50, 50, 0)
+            sh_color = st.color_picker("Shadow color", "#000000")
+            sh_alpha = st.slider("Shadow opacity", 0.0, 1.0, 0.18)
+            shadow_css = f"box-shadow: {sh_h}px {sh_v}px {sh_blur}px {sh_spread}px {hex_to_rgba(sh_color, sh_alpha)};"
         else:
-            bg_style = f"background-color:{st.sidebar.color_picker('Pick Background color', '#654FEF')}"
+            shadow_css = ""
 
-        # Shape customization
-        st.sidebar.subheader("Shape Customization")
-        height = st.sidebar.slider('Height (px)', 50, 500, 150)
-        width = st.sidebar.slider("Width (px)", 50, 500, 150)
-        
-        # ADVANCED FEATURE 2: Border customization with multiple sides
-        st.sidebar.subheader("Border Settings")
-        border_top = st.sidebar.slider("Top Border (px)", 0, 20, 1)
-        border_right = st.sidebar.slider("Right Border (px)", 0, 20, 1)
-        border_bottom = st.sidebar.slider("Bottom Border (px)", 0, 20, 1)
-        border_left = st.sidebar.slider("Left Border (px)", 0, 20, 1)
-        
-        border_style = st.sidebar.selectbox("Border Style", ["solid", "dotted", "dashed", "double", "groove", "ridge"])
-        border_color = st.sidebar.color_picker("Border Color", "#654FEF")
-        
-        # Corner radius
-        st.sidebar.subheader("Corner Radius")
-        top_left = st.sidebar.slider('Top Left', 0, 100, 10)
-        top_right = st.sidebar.slider("Top Right", 0, 100, 10)
-        bottom_left = st.sidebar.slider("Bottom Left", 0, 100, 10)
-        bottom_right = st.sidebar.slider("Bottom Right", 0, 100, 10)
+    # Transform controls
+    with st.expander("Transforms", expanded=False):
+        rotate = st.slider("Rotate (deg)", -360, 360, int(rget("rotate", 0)))
+        skew_x = st.slider("Skew X (deg)", -60, 60, int(rget("skew_x", 0)))
+        skew_y = st.slider("Skew Y (deg)", -60, 60, int(rget("skew_y", 0)))
+        scale = st.slider("Scale", 0.1, 3.0, float(rget("scale", 1.0)), step=0.05)
 
-        # ADVANCED FEATURE 3: Box Shadow with opacity slider
-        st.sidebar.subheader("Shadow Effects")
-        shadow = st.sidebar.checkbox("Add Shadow")
-        if shadow:
-            shadow_h = st.sidebar.slider("Horizontal Shadow", -50, 50, 10)
-            shadow_v = st.sidebar.slider("Vertical Shadow", -50, 50, 10)
-            shadow_blur = st.sidebar.slider("Blur Radius", 0, 50, 5)
-            shadow_spread = st.sidebar.slider("Spread", 0, 50, 0)
-            shadow_color = st.sidebar.color_picker("Shadow Color", "#000000")
-            shadow_opacity = st.sidebar.slider("Shadow Opacity", 0.0, 1.0, 0.5)
-            
-            # Convert to RGBA format for opacity
-            shadow_rgba = f"rgba({int(shadow_color[1:3], 16)}, {int(shadow_color[3:5], 16)}, {int(shadow_color[5:7], 16)}, {shadow_opacity})"
-            shadow_style = f"box-shadow: {shadow_h}px {shadow_v}px {shadow_blur}px {shadow_spread}px {shadow_rgba};"
-        else:
-            shadow_style = ""
+    # Clip-path / shape
+    st.subheader("Shape Type (clip-path)")
+    shape = st.selectbox("Choose shape", ["default (none)", "circle", "ellipse", "triangle", "polygon (custom)"])
+    polygon_points = ""
+    if shape == "polygon (custom)":
+        polygon_points = st.text_input("Polygon points (CSS list)", "50% 0%, 0% 100%, 100% 100%")
 
-        # Generate the shape
-        html_design = f"""
-        <div style="
-            height:{height}px;
-            width:{width}px;
-            {bg_style};
-            border-radius:{top_left}px {top_right}px {bottom_right}px {bottom_left}px;
-            border:{border_top}px {border_style} {border_color};
-            border-right:{border_right}px {border_style} {border_color};
-            border-bottom:{border_bottom}px {border_style} {border_color};
-            border-left:{border_left}px {border_style} {border_color};
-            margin: 30px auto;
-            {shadow_style}
-        ">
-        </div>
-        """
-        
-        st.markdown(html_design, unsafe_allow_html=True)
+    # Preset application
+    if preset != "None" and st.button("Apply Preset"):
+        if preset == "Rounded Card":
+            tl = tr = br = bl = 12
+            use_shadow = True
+            shadow_css = f"box-shadow: 6px 8px 24px {hex_to_rgba('#000000', 0.12)};"
+            width, height, unit = 360, 220, "px"
+            bg_color = "#ffffff"
+        elif preset == "Pill / Badge":
+            tl = tr = br = bl = 999
+            width, height, unit = 220, 48, "px"
+            bg_color = "#ff8a65"
+            b_top = b_right = b_bottom = b_left = 0
+        elif preset == "Perfect Circle":
+            shape = "circle"
+            width = height = 180
+            unit = "px"
+        elif preset == "Triangle":
+            shape = "triangle"
+            width, height, unit = 200, 160, "px"
+            tl = tr = br = bl = 0
+        elif preset == "Soft Card (shadow)":
+            width, height, unit = 340, 200, "px"
+            tl = tr = br = bl = 14
+            shadow_css = f"box-shadow: 0px 18px 40px {hex_to_rgba('#000000', 0.12)};"
+            bg_color = "#ffffff"
+        # Note: presets are applied locally; user can further tweak
 
-        if st.checkbox("View CSS Code"):
-            st.subheader("Generated CSS Code")
-            st.code(html_design)
+# Collect props
+props = {
+    "width": width,
+    "height": height,
+    "unit": unit,
+    "use_gradient": use_gradient,
+    "bg_color": bg_color,
+    "g1": g1,
+    "g2": g2,
+    "g_dir": g_dir,
+    "b_top": b_top,
+    "b_right": b_right,
+    "b_bottom": b_bottom,
+    "b_left": b_left,
+    "b_style": b_style,
+    "b_color": b_color,
+    "tl": tl,
+    "tr": tr,
+    "br": br,
+    "bl": bl,
+    "shadow_css": shadow_css,
+    "rotate": rotate,
+    "skew_x": skew_x,
+    "skew_y": skew_y,
+    "scale": scale,
+    "shape": shape,
+    "polygon_points": polygon_points,
+}
 
-        # Random generator button
-        if st.button("Generate Random Design"):
-            st.rerun()
+# --- Preview & CSS display -------------------------------------------------------
+with col_preview:
+    st.header("Live Preview")
+    css = generate_css(props)
 
-    elif choice == "About":
-        st.subheader("About This App")
-        st.info("""
-        This is an advanced CSS shape generator created by Amna.
-        You can create custom shapes with various styling options.
-        """)
-        st.text("Key Features:")
-        st.markdown("""
-        - Gradient backgrounds
-        - Individual border controls
-        - Shadow effects with opacity control
-        - Precise corner radius adjustments
-        """)
-        st.success("Built with Streamlit")
+    # Build small HTML preview that isolates the shape
+    preview_html = f"""
+    <div style="padding:20px; display:flex; justify-content:center; align-items:center;">
+      <div class="shape-preview"></div>
+    </div>
+    <style>
+    {css}
+    /* ensure preview background contrasts */
+    .stApp {{ background: linear-gradient(180deg, #f7f8fb, #ffffff); }}
+    </style>
+    """
 
-if __name__ == '__main__':
-    main()
+    st.components.v1.html(preview_html, height=420, scrolling=True)
+
+    st.subheader("Generated CSS")
+    st.code(css, language="css")
+
+    # Copy to clipboard button using a tiny HTML/JS component
+    copy_html = f"""
+    <button id="copyBtn">Copy CSS</button>
+    <script>
+      const css = `{css.replace('`', '\\`')}`;
+      const btn = document.getElementById("copyBtn");
+      btn.onclick = () => navigator.clipboard.writeText(css).then(()=>{{
+         btn.textContent = 'Copied!';
+         setTimeout(()=> btn.textContent = 'Copy CSS', 1200);
+      }});
+    </script>
+    """
+    st.components.v1.html(copy_html, height=50)
+
+    # Download button
+    st.download_button("Download CSS file", css, file_name="shape.css", mime="text/css")
+
+    st.markdown("---")
+    st.caption("Tip: toggle 'Use gradient' or try 'polygon (custom)' to create triangles and custom shapes with clip-path. Use small scale/rotate values for subtle effects.")
+
+# --- Footer / small help ---------------------------------------------------------
+st.markdown("""
+#### Quick tips
+- Use `clip-path` (polygon) to make any custom shape. Example polygon points for a diamond: `50% 0%, 100% 50%, 50% 100%, 0% 50%`.
+- When using `radial` gradient, the CSS uses `radial-gradient(...)`.
+- Export the CSS and paste into your project. The preview class is `.shape-preview`.
+""")
